@@ -1,0 +1,384 @@
+---
+title: "مثال على انحياز الانتقاء"
+subtitle: "تأثير غير موجود - نموذج خطي"
+format:
+  html:
+    dir: rtl
+    css: style.css
+    number-sections: true
+author:
+  - name: د. محمد أنس السلاخ (Mohammad A Alsallakh)
+    orcid: 0000-0002-8333-7279
+    email: anas.sal@gmail.com    
+      
+execute:
+  fig-width: 10
+  fig-height: 8
+  dpi: 300
+  fig-fontfamily: "sans"
+  fig-cap: ""
+  fig-align: center
+
+---
+
+
+```{r}
+#| label: settings
+#| echo: false
+#| message: false
+#| warning: false
+options(scipen = 100, digits = 4)
+geom_point_alpha = 0.5
+geom_point_size = 3
+library(tidyverse)
+library(patchwork)
+library(gt)
+s_curve <- scales::trans_new("s", 
+  transform = function(x) plogis(x, scale = 300),
+  inverse = function(x) qlogis(x, scale = 300)
+)
+theme1_scatter_plot = function(.source_tb){
+  list(
+    theme_minimal(),
+    theme(
+      text=element_text(size=18),
+      aspect.ratio = 1,
+      plot.title = element_text(size = 20),
+      plot.subtitle = element_text(size = 20)
+    ),
+    coord_fixed(xlim = c(-250, 250), ylim = c(-250, 250)),
+    scale_colour_gradientn(
+      #colours = c("#000", '#55F', '#c00'),
+      colours = c("#000", "#55F", "red"),
+      values = c(0, (0-min(.source_tb$collider))/(max(.source_tb$collider)-min(.source_tb$collider)), 1),
+      breaks = c(-1200, 0, 1200),
+      limits = c(-1200, 1200),
+      transform = s_curve,
+      oob = scales::squish
+    )
+  )
+}
+
+theme1.1 = function(.source_tb){
+  list(
+    theme_minimal(),
+    theme(
+      text=element_text(size=18),
+      aspect.ratio = 1,
+      plot.title = element_text(size = 20),
+      plot.subtitle = element_text(size = 20)
+    ), 
+    scale_colour_gradientn(
+        #colours = c("#000", '#55F', '#c00'),
+        colours = c("#000", "#55F", "red"),
+        values = c(0, (0-min(.source_tb$collider))/(max(.source_tb$collider)-min(.source_tb$collider)), 1),
+        breaks = c(-1200, 0, 1200),
+        limits = c(-1200, 1200),
+        transform = s_curve,
+        oob = scales::squish
+    ),
+    guides(colour = "none")
+  )
+}
+
+plot_densities = function(.tb, source_tb){
+  .tb |> 
+  pivot_longer(cols = everything(), names_to = 'variable') |>
+  group_by(variable) |>
+  mutate(facet_label = sprintf("%s\n\nMean: %.2f (SD: %.2f)", variable, mean(value), sd(value))) |>
+  ungroup() |>
+  ggplot(aes(x = value)) +
+  geom_density(data = \(d) filter(d, variable != "collider"), colour = "grey50") +
+  stat_density(data = \(d) filter(d, variable == "collider"), aes(colour = after_stat(x)), geom = "line") +
+  facet_wrap(~ facet_label, scales = 'free_y') +
+  theme1.1(.tb)
+}
+
+theme2 = list(
+  theme_minimal(),
+  theme(
+    text=element_text(size=20), aspect.ratio = 1,
+    plot.title = element_text(size = 24)
+  ),
+  scale_fill_gradient(low="black", high="white"),
+  scale_colour_gradient(low="#00ff00", high="#0000ff", limits = c(-1000, 1800)),
+  coord_fixed(xlim = c(-350, 200), ylim = c(-200, 450))
+)
+
+graph_plot_attr = list(node = list(fontsize = 2), edge = list(arrowsize = 20))
+options(repr.plot.width = 15, repr.plot.height = 15)
+```
+
+
+ 
+# توليد البيانات: نحن نصنع الواقع!
+
+```{r}
+n = 10000
+b1 = 0
+b2 = 5
+b3 = 10
+
+```
+
+ في هذا المثال:
+
+* سنقوم بتوليد جمهرة (n = `{r} n`)
+* سنحدد العلاقات بين المتغيرات بأنفسنا كمل يلي:
+
+
+    * `x` متغير عشوائي
+    * `y` متغير عشوائي، مستقل عن `x`
+    * `collider` نسمي هذا المتغير بالمصادم، لأنه يتلقى تأثيراً من x و تأثيراً من y،  أي يشكل نقطة تصادم تأثيرين قادمين من هذين المتغيرين.
+
+```{r}
+#| label: generate data
+#| echo: true
+
+tb = tibble(
+
+  x          =                       rnorm(n, 0, 50), 
+
+  y          =  b1 * x             + rnorm(n, 0, 50),
+
+  collider   =  b2 * x   + b3 * y  + rnorm(n, 0, 50)
+
+)
+
+```
+
+سنرسم مخطط DAG للعلاقات السببية التي حددناها بأنفسنا:
+
+```{r}
+#| echo: false
+#| dir: rtl
+
+DiagrammeR::grViz(paste0("
+  digraph {
+    node [shape=circle, fontsize=14, fixedsize=true, width=2, height=2]
+    edge [fontsize=15]
+
+    x [label=< <B><FONT POINT-SIZE=\"20\">x</FONT></B><BR/> >]
+    y [label=< <B><FONT POINT-SIZE=\"20\">y</FONT></B><BR/> >]
+    collider [label=< <B><FONT POINT-SIZE=\"20\">collider</FONT></B><BR/><BR/>= ", b2 ," * x + ", b3 ," * y >]
+
+    x -> y [label=<", ifelse(b1 != 0, paste0("* (", b1 ,")"), "no real causal relationship between x and y"), ">, minlen=3, color=", ifelse(b1 != 0, "black", "none"),"]
+    x -> collider [label=' * (", b2 ,")', minlen=2]
+    y -> collider [label=' * (", b3 ,")', minlen=2]
+    
+    {rank=same; x y}
+  }
+"), width = 400, height = 400)
+```
+
+هكذا تبدو الجمهرة.. إذا نظرنا إلها كجدول بيانات:
+```{r}
+#| echo: false
+tb |> head(5) |> gt() |> 
+  fmt_number(
+    columns = everything(),
+    decimals = 2,
+    use_seps = FALSE
+  ) |>  
+  tab_options(
+    data_row.padding = px(10),
+    table.width = pct(100)
+  )  
+
+```
+
+كيف يبدو توزع المتغيرات؟
+
+```{r}
+#| fig-height: 4
+#| echo: false
+
+tb |> 
+  plot_densities(source_tb = tb)
+
+```
+
+المخطط البياني التالي يظهر كل شخص كنقطة لها الخصائص البيانية التالية:
+
+* كل نقطة لها `x`
+* كل نقطة لها `y`
+* كل نقطة لها محيط ملون (من الأسود إلى الأحمر) - حسب قيمة `collider`
+
+```{r}
+#| label: scatterplot(tb) 
+#| echo: false
+#| fig-width: 10
+#| fig-height: 10
+
+tb |> ggplot(aes(x = x, y = y, colour = collider)) +
+  geom_point(shape = 21, size = geom_point_size, stroke = 0.7, alpha = geom_point_alpha) +
+  (theme1_scatter_plot(tb))
+
+```
+
+# سنحلل الارتباط بين `x` و `y`
+
+```{r}
+#| out-width: "60%"
+#| fig-width: 7
+#| fig-height: 7
+# y = b0  +  b1 * x   + e
+lm0 = lm(y ~ x, data = tb)  
+lm0 |> summary()
+
+```
+
+النموذج الخطي بين `x` و `y` يتفق مع العلاقة التي حددناها بينهما:
+
+ميل الخط البياني `{r} lm0$coefficients[['x']]` مع قيمة p value عالية (`{r} summary(lm0)$coefficients['x', 'Pr(>|t|)']`)، أي لم نعثر على دليل على ارتباط بين `x` و `y`.
+
+المخطط التالي يبين قيمة `y` التي يتنبؤها النموذج لكل قيمة `x`، وهذا مرة أخرى يتفق مع عدم وجود ارتباط بينهما `x` و `y`.
+```{r}
+#| echo: false
+marginaleffects::plot_predictions(lm0, condition = 'x') + theme1_scatter_plot(tb) + ylab('predicted y')
+```
+ 
+# لنأخذ عينة عشوائية تماماً من الجمهرة
+
+سنأخذ عينة عشوائية `n = 500`.
+
+```{r}
+#| echo: false
+#| fig-height: 5
+#| fig-width: 7
+
+tb_good_sample = tb |> slice_sample(n = 500)
+
+```
+
+
+توزع المتغيرات يبدو مشابهاً للجمهرة الأصل:
+
+```{r}
+#| label: density(tb_good_sample) 
+#| fig-height: 4
+#| echo: false
+
+tb_good_sample |> 
+  plot_densities(source_tb = tb)
+
+```
+
+ ونلاحظ أن التوزع المشترك لـ `x` و `y` و `collider` مشابه لما هو عليه في الجمهرة الأصل.
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 10
+
+tb_good_sample |> ggplot(aes(x = x, y = y, colour = collider)) +
+  geom_point(data = tb, aes(x, y), colour = "#ddd", shape = 1, size = geom_point_size) +
+  geom_point(shape = 21, size = geom_point_size, stroke = 0.7, alpha = geom_point_alpha) +
+  theme1_scatter_plot(tb)
+
+```
+
+
+
+النموذج الخطي بين `x` و `y` في هذا العينة الممثلة يتفق مع عدم وجود ارتباط (p value عالية):
+
+```{r}
+lm_s0 = lm(y ~ x, data = tb_good_sample)
+lm_s0 |> summary()
+```
+
+# عينة غير ممثلة
+**الآن لنأخذ عينة أخرى.. ولكن غير عشوائية تماماً، وإنما تعطي أولوية لمن لديه قيم `collider` أعلى، كما هو مبين في المخطط التالي:**
+
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 10
+
+# biased selection
+#tb_biased_sample = tb |>
+#  filter(collider > 500) |> slice_sample(n = 500)
+tb_biased_sample = tb |> slice_sample(n = 500, weight_by = plogis(collider, scale=100))
+#tb_biased_sample = tb |>
+#  slice_sample(n = 500, weight_by = exp(collider / 200))
+
+tb_biased_sample |> ggplot(aes(x = x, y = y, colour = collider)) +
+  geom_point(data = tb, aes(x, y), colour = "#ddd", shape = 1, size = geom_point_size) +
+  geom_point(shape = 21, size = geom_point_size, stroke = 0.7, alpha = geom_point_alpha) +
+  theme1_scatter_plot(tb)
+
+
+```
+
+توزع المتغيرات لا يشبه الجمهرة الأصل: في هذه العينة، أدى تفضيل قيم `collider` العالية إلى ارتفاع متوسط `x` و متوسط `y`:
+
+```{r}
+#| fig-height: 4
+#| echo: false
+
+tb_biased_sample |> 
+  plot_densities(source_tb = tb)
+
+```
+
+أما النموذج الخطي بين `x` و `y` فيظهر نشوء علاقة (غير حقيقية) بينهما ليست موجودة في الواقع:
+
+```{r}
+lm_s1 = lm(y ~ x, data = tb_biased_sample)
+lm_s1 |> summary()
+```
+
+هنا، نلاحظ أن العلاقة الزائفة بين `x` و `y` هي علاقة عكسية: ` `{r} coef(lm_s1)[["x"]] ` `
+
+لماذا؟
+
+قبل تحديد قيم `collider`، كان `x` و `y` مستقلان تماماً. ولكن بعد أن حصرنا قيم `collider` حصل ترابط زائف بينهما. اتجاه الترابط الزائف بين x و y تحدده الصيغة التي تربطهما بشكل غير مباشر (وبشكل "رجعي")، وهي معادلة الـ `collider`:
+
+$$ collider   =  `{r} b2` . x   + `{r} b3` . y  + noise $$
+
+في هذا المثال، حسب هذه المعادلة، العلاقة الرياضية بين `x` و `y` هي علاقة عكسية، أي لإنتاج قيمة محددة من `collider`، إذا كانت قيمة `x` عالية، يجب أن تكون قيمة `y` منخفضة، والعكس صحيح.
+
+وبما أننا قمنا بالحد من مجال قيم `collider`، مثلاً هنا فضلنا قيمه العالية، فلإنتاج هذه القيم المحدودة، ينبغي على `x` و `y` أن يخضعا لمعادلة `collider` التي تفرض علاقة عكسية بينهما.
+
+```{r}
+#| echo: false
+marginaleffects::plot_predictions(lm_s1, condition = 'x') + 
+  theme1_scatter_plot(tb) +
+  ylab('predicted y')
+```
+
+`collider` هو متغير مصادم بين `x` و `y`. ولكونه مصادم فإنه يمنع مرور أي تأثير بينهما.
+
+ولكن عندما يحدد `collider` من يدخل في عينة الدراسة، فعندئذ نقول:
+
+تم اشتراط الدخول إلى عينة الدراسة بناء على قيمة `collider`.
+
+أو نقول: conditioning on a collider.
+
+وهذا بالتعريف هو انحياز الانتقاء (selection bias) في دراسات الاستدلال السببي.
+
+يحدث الاشتراط على المصادم conditioning on a collider إما في الاعتيان (دخول عينة الدراسة) كما حدث هنا، أو عندما نقوم بضبط النموذج الإحصائي (بالخطأ) حسب متغير صادم (collider).
+
+لنرسم مخطط DAG لما حدث بعد أن اشترطنا على دخول العينة قيم معنية للـ `collider`: لأننا حددنا قيم `collider` في العينة، فهذا أنشأ مسار ترابط غير حقيقي (بالأحمر) بين `x` و `y` يمر عبر هذا الـ `collider`.
+
+```{r}
+#| echo: false
+#| dir: rtl
+
+DiagrammeR::grViz(paste0("
+  digraph {
+    node [shape=circle, fontsize=14, fixedsize=true, width=2, height=2]
+    edge [fontsize=15]
+    x [label=< <B><FONT POINT-SIZE=\"20\">x</FONT></B><BR/> >]
+    y [label=< <B><FONT POINT-SIZE=\"20\">y</FONT></B><BR/> >]
+    collider [label=< <B><FONT POINT-SIZE=\"20\">collider</FONT></B><BR/><BR/>= ", b2 ," * x + ", b3 ," * y >, shape=rectangle]
+
+    x -> y [label=<", ifelse(b1 != 0, paste0("* (", b1 ,")"), "no real causal relationship between x and y<br/>but a spurious association is created after we conditioned the sampling on a collider"), ">, minlen=3, color=", ifelse(b1 != 0, "black", "none"),"]
+    x -> collider [label=' * (", b2 ,")', minlen=2, color=red]
+    y -> collider [label=' * (", b3 ,")', minlen=2, color=red]
+    
+    {rank=same; x y}
+  }
+"), width = 400, height = 400)
+```

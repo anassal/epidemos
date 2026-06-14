@@ -1,0 +1,20 @@
+.cell {
+  direction: ltr !important;
+  text-align: left !important;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+
+div.sourceCode {
+  background-color: #d1e7fe !important;
+  border: 2px solid #007bc2 !important;
+  border-radius: 5px;
+}
+
+.cell-output {
+  background-color: #f4f4f4;
+  border: 1px solid #9b9b9b;
+  border-radius: 5px;
+  padding: 1px;
+}

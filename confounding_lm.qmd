@@ -1,0 +1,311 @@
+---
+title: "مثال على الالتباس confounding"
+subtitle: "تأثير غير موجود - نموذج خطي"
+format:
+  html:
+    dir: rtl
+    css: style.css
+    number-sections: true
+author:
+  - name: د. محمد أنس السلاخ (Mohammad A Alsallakh)
+    orcid: 0000-0002-8333-7279
+    email: anas.sal@gmail.com    
+      
+execute:
+  fig-width: 10
+  fig-height: 8
+  dpi: 300
+  fig-fontfamily: "sans"
+  fig-cap: ""
+  fig-align: center
+
+---
+
+
+```{r}
+#| label: settings
+#| echo: false
+#| message: false
+#| warning: false
+options(scipen = 100, digits = 4)
+geom_point_alpha = 0.5
+geom_point_size = 3
+library(tidyverse)
+library(patchwork)
+library(gt)
+s_curve <- scales::trans_new("s", 
+  transform = function(x) plogis(x, scale = 50),
+  inverse = function(x) qlogis(x, scale = 50)
+)
+theme1_scatter_plot = function(.source_tb){
+  list(
+    theme_minimal(),
+    theme(
+      text=element_text(size=18),
+      aspect.ratio = 1,
+      plot.title = element_text(size = 20),
+      plot.subtitle = element_text(size = 20)
+    ),
+    coord_fixed(ratio = 1, xlim = c(-450, 250), ylim = c(-200, 550)),
+    scale_fill_gradient(low = '#000', high = '#fff'),
+    scale_x_continuous(breaks = (-5:3)*100), 
+    scale_y_continuous(breaks = (-2:6)*100) 
+  )
+}
+
+theme1.1 = function(.source_tb){
+  list(
+    theme_minimal(),
+    theme(
+      text=element_text(size=18),
+      aspect.ratio = 1,
+      plot.title = element_text(size = 20),
+      plot.subtitle = element_text(size = 20)
+    ), 
+    scale_colour_gradientn(
+        #colours = c("#000", '#55F', '#c00'),
+        colours = c("#000", "#55F", "red"),
+        values = c(0, (0-min(.source_tb$collider))/(max(.source_tb$collider)-min(.source_tb$collider)), 1),
+        breaks = c(-1200, 0, 1200),
+        limits = c(-1200, 1200),
+        transform = s_curve,
+        oob = scales::squish
+    ),
+    guides(colour = "none")
+  )
+}
+
+plot_densities = function(.tb, source_tb){
+  .tb |> 
+  pivot_longer(cols = everything(), names_to = 'variable') |>
+  group_by(variable) |>
+  mutate(facet_label = sprintf("%s\n\nMean: %.2f (SD: %.2f)", variable, mean(value), sd(value))) |>
+  ungroup() |>
+  ggplot(aes(x = value)) +
+  geom_density(data = \(d) filter(d, variable != "collider"), colour = "grey50") +
+  stat_density(data = \(d) filter(d, variable == "collider"), aes(colour = after_stat(x)), geom = "line") +
+  facet_wrap(~ facet_label, scales = 'free_y') +
+  theme1.1(.tb)
+}
+
+theme2 = list(
+  theme_minimal(),
+  theme(
+    text=element_text(size=20), aspect.ratio = 1,
+    plot.title = element_text(size = 24)
+  ),
+  scale_fill_gradient(low="black", high="white"),
+  scale_colour_gradient(low="#00ff00", high="#0000ff", limits = c(-1000, 1800)),
+  coord_fixed(xlim = c(-350, 200), ylim = c(-200, 450))
+)
+
+graph_plot_attr = list(node = list(fontsize = 2), edge = list(arrowsize = 20))
+options(repr.plot.width = 15, repr.plot.height = 15)
+```
+
+ 
+# توليد البيانات: نحن نصنع الواقع!
+
+```{r}
+n = 10000
+c2x = -1.5
+c2y = 3
+
+```
+
+ في هذا المثال:
+
+* سنقوم بتوليد جمهرة (n = `{r} n`)
+* سنحدد العلاقات بين المتغيرات بأنفسنا كمل يلي:
+    
+    * `x` و `y` هما متغيرين مستمرين مستقلين عشوائياً
+    * لا توجد علاقة سببية بين `x` و `y`
+    * `confounder` هو **كونفاوندر** (متغير مربك) - سنرى دوره المربك بعد قليل
+    * `confounder` يؤثر على `x`
+    * `confounder` يؤثر على `y`
+
+نلاحظ: **لا توجد أية علاقة مباشرة بين x و y.** وبناء عليه قد يظن أحدنا أنه إذا شاهدنا تغيراً في أحدهما فلن يسبب ذلك تغيراً في الآخر. ولكن هذا غير صحيح. والسبب؟
+
+السبب هو وجود المتغير المربك `confounder` الذي يؤثر في كل من x و y.
+
+```{r}
+#| echo: true
+n = 10000
+
+# no causal effect between x and y
+tb = tibble(
+
+  confounder = runif(n, 0, 100),
+
+  x          = c2x * confounder     + rnorm(n, 0, 50), 
+
+  y          = c2y * confounder     + rnorm(n, 0, 40)
+
+)
+
+# notes:
+# large error in the exposure x --> attenuation bias
+# large error in the outcome y --> large stderr
+
+
+```
+
+سنرسم مخطط DAG للعلاقات السببية التي حددناها بأنفسنا:
+
+```{r}
+#| echo: false
+#| dir: rtl
+
+DiagrammeR::grViz(paste0("
+  digraph {
+    node [shape=circle, fontsize=14, fixedsize=true, width=2, height=2]
+    edge [fontsize=15]
+    confounder [label=< <B><FONT POINT-SIZE=\"20\">confounder</FONT></B> >]
+
+    x [label=< <B><FONT POINT-SIZE=\"20\">x</FONT></B><BR/><BR/>= ", c2x, " * confounder >]
+    y [label=< <B><FONT POINT-SIZE=\"20\">y</FONT></B><BR/><BR/>= ", c2y, " * confounder >]
+
+    confounder -> x [label=' * (", c2x, ")']
+    confounder -> y [label=' * (", c2y, ")']
+    x -> y [label=< لا يوجد ترابط مباشر بين <br/>x و y >, minlen=3, color=none]
+    
+    {rank=same; x y}
+  }
+"), width = 400, height = 400)
+```
+
+<br>
+هكذا تبدو الجمهرة.. إذا نظرنا إلها كجدول بيانات (أول 5 صفوف):
+```{r}
+#| echo: false
+tb |> head(5) |> gt() |> 
+  fmt_number(
+    columns = everything(),
+    decimals = 2,
+    use_seps = FALSE
+  ) |>  
+  tab_options(
+    data_row.padding = px(10),
+    table.width = pct(100)
+  )  
+
+```
+
+
+المخطط البياني التالي يظهر كل شخص كنقطة لها الخصائص البيانية التالية:
+
+* كل نقطة لها `x`
+* كل نقطة لها `y`
+* كل نقطة لها لون داخلي (من الأسود إلى الأبيض) - حسب قيمة `confounder`
+
+نلاحظ وجود ارتباط (ظاهري) واضح بين `x` و `y` حيث يبدو ميل الارتباط الخطي `2`.
+
+```{r}
+#| echo: false
+tb |> ggplot(aes(x = x, y = y, fill = confounder)) +
+  geom_point(shape = 21, size=1.5, stroke=0.7, alpha=0.9) +
+  theme1_scatter_plot(tb)
+```
+
+
+# الالتباس confounding
+## تحليل العلاقة بين `x` و `y` بدون أخذ `confounder` بعين الاعتبار!
+
+سنحلل الترابط بين `x` و `y` متجاهلين أن `confounder` هو متغير مربك يؤثر على كل منهما.
+
+```{r}
+#| out-width: "60%"
+#| fig-width: 7
+#| fig-height: 7
+# y = b0  +  b1 * x   + e
+lm0 = lm(y ~ x, data = tb)  
+lm0 |> summary()
+```
+
+```{r}
+#| echo: false
+marginaleffects::plot_predictions(lm0, condition = 'x') + theme1_scatter_plot(tb) + ylab('estimate of y')
+```
+::: {style="text-align:center; font-size:5.5em;"}
+!!!
+:::
+
+
+النموذج الخطي يقول بأن `x` له تأثير مهم إحصائياً على `y`! السبب هو أننا لم نضبط النموذج الخطي حسب `confounder`.
+ 
+
+```{r}
+#| echo: false
+printCoefmat(coef(summary(lm0))["x", , drop = FALSE], signif.stars = F)
+
+```
+
+ ملاحظة جانبية: حجم الارتباط (الزائف بالمناسبة) 
+ ``r round(coef(lm(y ~ x, data = tb))["x"], 3)``
+ أصغر مما نتوقعه من العلاقات التي وضعناها في الجمهرة ` `{r} round(c2y/c2x,1)` ` وذلك بسبب الخطأ العشوائي `rnorm(n, 0, 50)` في المتغير المستقل `x`. هذا يسمى انحياز التخامد [attenuation bias](https://en.wikipedia.org/wiki/Regression_dilution) في النموذج الخطي، أي اقتراب حجم الترابط إلى قيمة العدم (هنا `0`).
+
+نقول أن المتغير المربك `confounder` يفتح مساراً خلفياً ([backdoor](https://en.wikipedia.org/wiki/Confounding#Definition)) بين `x` و `y`. هنا نرى المسار الخلفي باللون الأحمر، ويؤدي عملياً إلى ترابط غير حقيقي بين المتغيرين المستقلين سببياً: 
+
+```{r}
+#| echo: false
+#| dir: rtl
+
+DiagrammeR::grViz(paste0("
+  digraph {
+    node [shape=circle, fontsize=14, fixedsize=true, width=2, height=2]
+    edge [fontsize=15]
+    confounder [label=< <B><FONT POINT-SIZE=\"20\">confounder</FONT></B> >]
+
+    x [label=< <B><FONT POINT-SIZE=\"20\">x</FONT></B><BR/><BR/>= ", c2x, " * confounder >]
+    y [label=< <B><FONT POINT-SIZE=\"20\">y</FONT></B><BR/><BR/>= ", c2y, " * confounder >]
+
+    confounder -> x [label=' * (", c2x, ")', color=red]
+    confounder -> y [label=' * (", c2y, ")', color=red]
+    x -> y [label=< لا يوجد ترابط مباشر بين <br/>x و y >, minlen=3, color=none]
+    
+    {rank=same; x y}
+  }
+"), width = 400, height = 400)
+```
+
+
+
+## تحليل العلاقة بين `x` و `y` مع ضبط حسب `confounder`
+
+سنعيد نمذجة الترابط بين `x` و `y` ولكن بعد الاعتراف بـ `confounder` كمتغير مربك يؤثر على كل منهما. أي، سنضيفه كمتغير مستقل في النموذج.
+
+```{r}
+#| fig-width: 14
+#| fig-height: 7
+#| echo: false
+lm1 = lm(y ~ x + confounder, data = tb)
+lm1 |> summary()
+# est now very small (~0) and high(er) p value
+# P(estimate of x >= this coef | H0)
+# spurious association x -> y gone
+# confounder -> y sig
+(
+    marginaleffects::plot_predictions(lm1, condition = 'x') +
+      labs(title = 'اختفى تأثير x', y = 'estimate of y') + theme2
+) + (
+    marginaleffects::plot_predictions(lm1, condition = 'confounder') + 
+      labs(title = 'تأثير confounder', y = 'estimate of y') + theme2
+) +
+  plot_layout(ncol = 2, widths = c(1, 1), guides = "collect") 
+```
+
+
+نلاحظ أن النموذج الخطي الجديد يظهر أن `x` لم يعد له تأثير مهم إحصائياً على `y`!  (p-value عالية)
+
+```{r}
+#| echo: false
+printCoefmat(coef(summary(lm1))["x", , drop = FALSE], signif.legend = F)
+```
+
+
+النموذج يظهر أيضاً أن `confounder` هو الذي لديه ارتباط قوي جداً مع `y` (p-value صغيرة جداً) وبالتالي، هو الذي يفسر الترابط الظاهري الزائف بين `x` و `y`.
+
+```{r}
+#| echo: false
+printCoefmat(coef(summary(lm1))["confounder", , drop = FALSE], signif.legend = F)
+```
